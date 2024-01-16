@@ -7,12 +7,24 @@ import torch.nn as nn
 
 
 #import seaborn as sns
-
-from matplotlib import pyplot as plt
-import matplotlib.colors
 import numpy as np
 
-def create_neural_network(input_size, output_size, layers=[40, 40, 40, 40], activation_function=nn.ReLU(), dropout=0.0, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+class Neural_network(nn.Module):
+    def __init__(self, input_size1, output_size1, input_size2, output_size2, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+        
+        super().__init__()
+        
+        self.device = device
+
+        self.input_size1 = input_size1
+        self.output_size1 = output_size1
+        self.input_size2 = input_size2
+        self.output_size2 = output_size2
+
+    def init_net1(self, layers=[40, 40, 40, 40], activation_function=nn.ReLU(), dropout=0.0):
+
+        input_size = self.input_size1
+        output_size = self.output_size1
 
         modules = []
 
@@ -26,7 +38,42 @@ def create_neural_network(input_size, output_size, layers=[40, 40, 40, 40], acti
 
         modules.append(nn.Linear(layers[-1], output_size))
 
-        return nn.Sequential(*modules).to(device)
+        self.net1 = nn.Sequential(*modules).to(self.device)
+
+    def init_net2(self, layers=[40, 40, 40, 40], activation_function=nn.ReLU(), dropout=0.0):
+
+        input_size = self.input_size1 + self.output_size1 + self.input_size2
+        output_size = self.output_size2
+
+        modules = []
+
+        modules.append(nn.Linear(input_size, layers[0]))
+        modules.append(activation_function)
+
+        for _in, _out in list(zip(layers, layers[1:])):
+            modules.append(nn.Linear(_in, _out))
+            modules.append(activation_function)
+            modules.append(nn.Dropout(dropout))
+
+        modules.append(nn.Linear(layers[-1], output_size))
+
+        self.net2 = nn.Sequential(*modules).to(self.device)
+
+    def forward(self,x):
+
+        # Get the output of the first network
+        y1 = self.net1(x[:,:self.input_size1])
+
+        # Join the inputs to this output
+        x2 = torch.cat((x,y1), dim=1)
+
+        # Get the output of the second network
+        y2 = self.net2(x2)
+
+        # Return the output of both networks
+        return torch.cat((y1,y2), dim=1)
+
+
     
 class Data_loader:
     def __init__(self, file_path, val_frac=0.2, device=torch.device("cuda" if torch.cuda.is_available () else "cpu"), seed=None):
@@ -143,17 +190,18 @@ class Data_loader:
     def get_batch2(self,batch_size=10,shuffle=True,validation=False):
 
         if not validation:
-            n = self.n_train
             X1 = self.X1_t
             X2 = self.X2_t
             Y1 = self.Y1_t
             Y2 = self.Y2_t
         else:
-            n = self.n_val
             X1 = self.X1_v
             X2 = self.X2_v
             Y1 = self.Y1_v
             Y2 = self.Y2_v
+
+        X = torch.cat((X1,X2), dim=1)
+        Y = torch.cat((Y1,Y2), dim=1)
 
         # Only consider non-nan values
         inds = torch.nonzero(torch.isnan(Y2[:,0])==False).tolist()
@@ -162,9 +210,11 @@ class Data_loader:
         if shuffle:
             np.random.shuffle(inds)
 
+        n = len(inds)
+
         for i in range(0, n, batch_size):
             ind = inds[i:i+batch_size]
-            yield X1[ind,:], Y1[ind,:], X2[ind,:], Y2[ind,:]
+            yield X[ind,:], Y[ind,:]
 
     def get_df(self):
         return self.df
