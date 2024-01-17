@@ -23,6 +23,8 @@ class Neural_network(nn.Module):
 
     def init_net1(self, layers=[40, 40, 40, 40], activation_function=nn.ReLU(), dropout=0.0):
 
+        self.layers1 = layers
+
         input_size = self.input_size1
         output_size = self.output_size1
 
@@ -41,6 +43,8 @@ class Neural_network(nn.Module):
         self.net1 = nn.Sequential(*modules).to(self.device)
 
     def init_net2(self, layers=[40, 40, 40, 40], activation_function=nn.ReLU(), dropout=0.0):
+
+        self.layers2 = layers
 
         input_size = self.input_size1 + self.output_size1 + self.input_size2
         output_size = self.output_size2
@@ -72,7 +76,23 @@ class Neural_network(nn.Module):
 
         # Return the output of both networks
         return torch.cat((y1,y2), dim=1)
+    
+    def save(self,filename):
 
+        torch.save({'net1': self.net1.state_dict(),
+                    'net2': self.net2.state_dict(),
+                    'layers1': self.layers1,
+                    'layers2': self.layers2},filename)
+        
+    def load(self,filename):
+
+        model_file = torch.load(filename)
+
+        self.init_net1(layers=model_file['layers1'])
+        self.init_net2(layers=model_file['layers2'])
+
+        self.net1.load_state_dict(model_file['net1'])
+        self.net2.load_state_dict(model_file['net2'])
 
     
 class Data_loader:
@@ -83,7 +103,7 @@ class Data_loader:
 
         self.device = device
 
-        ## Set options for reading the Excel file
+        ## Set options for reading the Excel file        
         self.header_names = ['c','c_cov','phi','phi_cov','gamma','gamma_cov','HV','H','V1','FS','V2','beta','PF','C_oper','A0','C_constr','C_init','Af','C_fail','C_total']
         
         self.input_columns_DDO = ['c','phi','gamma','HV','H']
@@ -106,20 +126,19 @@ class Data_loader:
 
         self.df = df.copy()
 
-        # Get number of samples
-
-        self.n_cases = len(self.df)
-        self.n_train = int((1-val_frac)*self.n_cases)
-        self.n_val = self.n_cases-self.n_train
-
+        # Get inputs and outputs
         X1 = self.df[self.input_columns_DDO].to_numpy()
         Y1 = self.df[self.output_columns_DDO].to_numpy()
 
         X2 = self.df[self.input_columns_RBDO].to_numpy()
         Y2 = self.df[self.output_columns_RBDO].to_numpy()
 
-        # Train/validation split
+        # Get total number of samples
+        self.n_cases = len(self.df)
+        self.n_train = int((1-val_frac)*self.n_cases)
+        self.n_val = self.n_cases-self.n_train
 
+        # Train/validation split
         inds = list(range(0,self.n_cases))
         np.random.shuffle(inds)
         inds_t = inds[:self.n_train]
@@ -134,6 +153,11 @@ class Data_loader:
         Y1_v = Y1[inds_v,:]
         X2_v = X2[inds_v,:]
         Y2_v = Y2[inds_v,:]
+
+        # Get number of samples of the second phase
+        self.n_cases2 = np.sum(np.isnan(Y2[:,0])==False)
+        self.n_train2 = np.sum(np.isnan(Y2_t[:,0])==False)
+        self.n_val2 = np.sum(np.isnan(Y2_v[:,0])==False)
 
         # Normalize values
         self.X1_norm = [np.nanmean(X1_t, axis = 0), np.nanstd(X1_t, axis = 0)]
@@ -160,11 +184,29 @@ class Data_loader:
 
     def normalize_values(self,X1=None,X2=None,Y1=None,Y2=None):
         
-        X1 = (X1-self.X1_norm[0])/self.X1_norm[1]
-        X2 = (X2-self.X2_norm[0])/self.X2_norm[1]
+        if X1 is not None:
+            X1 = (X1-self.X1_norm[0])/self.X1_norm[1]
+        if X2 is not None:
+            X2 = (X2-self.X2_norm[0])/self.X2_norm[1]
 
-        Y1 = (Y1-self.Y1_norm[0])/self.Y1_norm[1]
-        Y2 = (Y2-self.Y2_norm[0])/self.Y2_norm[1]
+        if Y1 is not None:
+            Y1 = (Y1-self.Y1_norm[0])/self.Y1_norm[1]
+        if Y2 is not None:
+            Y2 = (Y2-self.Y2_norm[0])/self.Y2_norm[1]
+
+        return X1, X2, Y1, Y2
+    
+    def denormalize_values(self,X1=None,X2=None,Y1=None,Y2=None):
+        
+        if X1 is not None:
+            X1 = X1 * self.X1_norm[1] + self.X1_norm[0]
+        if X2 is not None:
+            X2 = X2 * self.X2_norm[1] + self.X2_norm[0]
+
+        if Y1 is not None:
+            Y1 = Y1 * self.Y1_norm[1] + self.Y1_norm[0]
+        if Y2 is not None:
+            Y2 = Y2 * self.Y2_norm[1] + self.Y2_norm[0]
 
         return X1, X2, Y1, Y2
 
