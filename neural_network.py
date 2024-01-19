@@ -76,13 +76,81 @@ class Neural_network(nn.Module):
 
         # Return the output of both networks
         return torch.cat((y1,y2), dim=1)
+
+    def set_norms(self,X1_norm,X2_norm,Y1_norm,Y2_norm):
+        self.X1_norm = X1_norm
+        self.X2_norm = X2_norm
+        self.Y1_norm = Y1_norm
+        self.Y2_norm = Y2_norm
+
+    def normalize_X(self,X1=None,X2=None):
+        
+        if X1 is not None:
+            X1 = (X1-self.X1_norm[0])/self.X1_norm[1]
+        if X2 is not None:
+            X2 = (X2-self.X2_norm[0])/self.X2_norm[1]
+
+        return X1, X2
+    
+    def normalize_Y(self,Y1=None,Y2=None):
+        
+        if Y1 is not None:
+            Y1 = (Y1-self.Y1_norm[0])/self.Y1_norm[1]
+        if Y2 is not None:
+            Y2 = (Y2-self.Y2_norm[0])/self.Y2_norm[1]
+
+        return Y1, Y2
+    
+    def denormalize_X(self,X1=None,X2=None):
+
+        if X1 is not None:
+            X1 = X1 * self.X1_norm[1] + self.X1_norm[0]
+        if X2 is not None:
+            X2 = X2 * self.X2_norm[1] + self.X2_norm[0]
+
+        return X1, X2
+
+    def denormalize_Y(self,Y1=None,Y2=None):
+
+        if Y1 is not None:
+            Y1 = Y1 * self.Y1_norm[1] + self.Y1_norm[0]
+        if Y2 is not None:
+            Y2 = Y2 * self.Y2_norm[1] + self.Y2_norm[0]
+
+        return Y1, Y2
+    
+    def run_model(self, HV, H, c, phi, gamma, c_cov, phi_cov, gamma_cov):
+        # TODO: Allow inputs to be given as arrays
+        X1 = [c, phi, gamma, HV, H]
+        X2 = [c_cov, phi_cov, gamma_cov]
+
+        X1,X2 = self.normalize_X(X1=X1,X2=X2)
+        X = torch.tensor(np.hstack((X1,X2)),dtype=torch.float32,device=self.device).reshape(-1,self.input_size1+self.input_size2)
+
+        Y = self.forward(X)
+
+        Y1 = Y[:,:self.output_size1].cpu().detach().numpy()
+        Y2 = Y[:,self.output_size1:].cpu().detach().numpy()
+
+        Y1,Y2 = self.denormalize_Y(Y1=Y1,Y2=Y2)
+
+        V1 = Y1[0,0]
+        FS = Y1[0,1]
+        V2 = Y2[0,0]
+        beta = Y2[0,1]
+
+        return V1, FS, V2, beta
     
     def save(self,filename):
 
         torch.save({'net1': self.net1.state_dict(),
                     'net2': self.net2.state_dict(),
                     'layers1': self.layers1,
-                    'layers2': self.layers2},filename)
+                    'layers2': self.layers2,
+                    'X1_norm': self.X1_norm,
+                    'X2_norm': self.X2_norm,
+                    'Y1_norm': self.Y1_norm,
+                    'Y2_norm': self.Y2_norm},filename)
         
     def load(self,filename):
 
@@ -93,6 +161,8 @@ class Neural_network(nn.Module):
 
         self.net1.load_state_dict(model_file['net1'])
         self.net2.load_state_dict(model_file['net2'])
+
+        self.set_norms(model_file['X1_norm'],model_file['X2_norm'],model_file['Y1_norm'],model_file['Y2_norm'])
 
     
 class Data_loader:
@@ -111,6 +181,7 @@ class Data_loader:
 
         self.input_columns_RBDO = ['c_cov','phi_cov','gamma_cov']
         self.output_columns_RBDO = ['V2','beta']
+        #self.output_columns_RBDO = ['V2','PF']
 
         ## Read the Excel file
         df = pd.read_excel(file_path, sheet_name='1_RO', header=1)
