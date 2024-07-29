@@ -3,6 +3,8 @@ wandb
 
 *.pt
 *.csv
+*.png
+
 !model.pt
 
 # Byte-compiled / optimized / DLL files

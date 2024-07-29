@@ -3,6 +3,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
+from scipy.stats import norm
+
 #from sklearn.metrics import r2_score
 
 
@@ -31,12 +33,13 @@ class Neural_network(nn.Module):
         modules = []
 
         modules.append(nn.Linear(input_size, layers[0]))
+        modules.append(nn.Dropout(dropout))
         modules.append(activation_function)
 
         for _in, _out in list(zip(layers, layers[1:])):
             modules.append(nn.Linear(_in, _out))
-            modules.append(activation_function)
             modules.append(nn.Dropout(dropout))
+            modules.append(activation_function)
 
         modules.append(nn.Linear(layers[-1], output_size))
 
@@ -52,12 +55,13 @@ class Neural_network(nn.Module):
         modules = []
 
         modules.append(nn.Linear(input_size, layers[0]))
+        modules.append(nn.Dropout(dropout))
         modules.append(activation_function)
 
         for _in, _out in list(zip(layers, layers[1:])):
             modules.append(nn.Linear(_in, _out))
-            modules.append(activation_function)
             modules.append(nn.Dropout(dropout))
+            modules.append(activation_function)
 
         modules.append(nn.Linear(layers[-1], output_size))
 
@@ -119,10 +123,17 @@ class Neural_network(nn.Module):
 
         return Y1, Y2
     
-    def run_model(self, HV, H, c, phi, gamma, c_cov, phi_cov, gamma_cov):
-        # TODO: Allow inputs to be given as arrays
-        X1 = [c, phi, gamma, HV, H]
-        X2 = [c_cov, phi_cov, gamma_cov]
+    def run_model(self,df,costs={'operation':5, 'escavation':13, 'failure1':20, 'failure2':10000, 'expansion':1.2}):
+
+        if not isinstance(df,pd.DataFrame): # Convert to df is not
+            if isinstance(df[0],int) or isinstance(df[0],float): # Check if its a single point
+                df = pd.DataFrame([df], columns=['c','phi','gamma','HV','H','c_cov','phi_cov','gamma_cov'])
+            else:
+                df = pd.DataFrame(df, columns=['c','phi','gamma','HV','H','c_cov','phi_cov','gamma_cov'])
+
+
+        X1 = df[['c','phi','gamma','HV','H']].to_numpy()
+        X2 = df[['c_cov','phi_cov','gamma_cov']].to_numpy()
 
         X1,X2 = self.normalize_X(X1=X1,X2=X2)
         X = torch.tensor(np.hstack((X1,X2)),dtype=torch.float32,device=self.device).reshape(-1,self.input_size1+self.input_size2)
@@ -134,12 +145,21 @@ class Neural_network(nn.Module):
 
         Y1,Y2 = self.denormalize_Y(Y1=Y1,Y2=Y2)
 
-        V1 = Y1[0,0]
-        FS = Y1[0,1]
-        V2 = Y2[0,0]
-        beta = Y2[0,1]
+        area_initial = 0.5*df['HV'].to_numpy()*df['H'].to_numpy()**2
+        area_failure = Y2[:,0]*costs['expansion']
+        PF = norm.cdf(-Y2[:,1])
 
-        return V1, FS, V2, beta
+        c_construction = area_initial*costs['escavation']
+        c_fail = (area_failure*costs['failure1'] + costs['failure2'])*PF
+
+        c_initial = costs['operation'] + c_construction
+
+        c_total = c_initial + c_fail
+
+        df_out = pd.DataFrame(np.hstack((Y1,Y2,PF.reshape(-1,1),c_initial.reshape(-1,1),c_fail.reshape(-1,1),c_total.reshape(-1,1))),
+                              columns=['V1','FS','V2','beta','PF','Cost_initial','Cost_fail','Cost_total'])
+
+        return df.join(df_out)
     
     def save(self,filename):
 
@@ -194,6 +214,9 @@ class Data_loader:
 
         # Remove dashes
         df.replace('-', np.NaN, inplace=True)
+
+        # Remove entries with beta > 8
+        df = df[df['beta'] <= 8]
 
         self.df = df.copy()
 
